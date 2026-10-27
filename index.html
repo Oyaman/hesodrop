@@ -177,6 +177,8 @@ body.settings-open #hud, body.settings-open #hint{ display:none; }
 .rankList li{ display:grid; grid-template-columns:2em 1fr auto; gap:8px; align-items:center; padding:8px 10px; border-radius:12px; font-weight:800; }
 .rankList li:nth-child(odd){ background:rgba(10,134,214,.07); }
 .rankList li.me{ background:rgba(255,122,26,.18); }
+.rankList li.gap{ display:block; text-align:center; color:var(--sub); padding:2px 0; background:none; }
+.rankList li.pinned{ position:sticky; bottom:0; background:#ffe1c8; box-shadow:0 -4px 10px rgba(120,60,0,.12); }
 .rankList li.empty{ display:block; text-align:center; color:var(--sub); }
 .rankList .rk{ color:var(--sun); text-align:center; }
 .rankList .tm{ font-variant-numeric:tabular-nums; }
@@ -992,18 +994,33 @@ async function submitOnline(entry){
   const res = await fetch(RANKING_URL, { method:'POST', headers:{ 'Content-Type':'text/plain;charset=utf-8' }, body: JSON.stringify(entry) });
   const j = await res.json(); if (!j.ok) throw new Error(j.error || 'error'); return j;
 }
-function renderRanking(el, highlight, list){
+function rankRow(rank, name, time, cls){
+  const li = document.createElement('li');
+  if (cls) li.className = cls;
+  const rk = document.createElement('span'); rk.className = 'rk'; rk.textContent = rank;
+  const nm = document.createElement('span'); nm.className = 'nm'; nm.textContent = name;
+  const tm = document.createElement('span'); tm.className = 'tm'; tm.textContent = fmtTime(time);
+  li.append(rk, nm, tm); return li;
+}
+// 1〜100位をスクロールで表示。自分が100位に入っていなければ、いちばん下に自分の順位を固定表示
+function renderRanking(el, highlight, list, me){
   const r = list || loadRanking();
   el.innerHTML = '';
-  if (!r.length){ el.innerHTML = '<li class="empty">まだ記録がありません</li>'; return; }
+  if (!r.length && !me){ el.innerHTML = '<li class="empty">まだ記録がありません</li>'; return; }
+  let mine = null;
   r.forEach((e, i) => {
-    const li = document.createElement('li');
-    if (e.me || (highlight && e.id === highlight)) li.className = 'me';
-    const rank = document.createElement('span'); rank.className = 'rk'; rank.textContent = (i+1);
-    const nm = document.createElement('span'); nm.className = 'nm'; nm.textContent = e.name;
-    const tm = document.createElement('span'); tm.className = 'tm'; tm.textContent = fmtTime(e.time);
-    li.append(rank, nm, tm); el.appendChild(li);
+    const isMe = e.me || (highlight && e.id === highlight);
+    const li = rankRow(i+1, e.name, e.time, isMe ? 'me' : '');
+    if (isMe) mine = li;
+    el.appendChild(li);
   });
+  if (!mine && me && me.rank > r.length){
+    const gap = document.createElement('li'); gap.className = 'gap'; gap.textContent = '⋮';
+    el.appendChild(gap);
+    el.appendChild(rankRow(me.rank > 1000 ? '圏外' : me.rank, me.name, me.time, 'me pinned'));
+  }
+  el.scrollTop = 0;
+  if (mine) requestAnimationFrame(() => mine.scrollIntoView({ block:'center' }));
 }
 let lastEntry = null;
 function showEnding(){
@@ -1042,13 +1059,9 @@ $('endSave').addEventListener('click', () => {
   const id = lastEntry.id;
   submitOnline({ id, pid:playerId(), name, time:Math.round(lastEntry.time*10)/10 })
     .then(j => {
-      if (j.isBest){
-        $('endRankMsg').textContent = j.rank <= 100 ? `自己ベスト更新！ 全国${j.rank}位` : `自己ベスト更新！ 全国${j.rank}位（100位圏外）`;
-      } else {
-        $('endRankMsg').textContent = `自己ベストは${fmtTime(j.best)}（全国${j.rank}位）`;
-      }
-      renderRanking($('endRankList'), id, j.top);
-      const me = $('endRankList').querySelector('.me'); if (me) me.scrollIntoView({ block:'center' });
+      const rk = j.rank > 1000 ? '1000位圏外' : `全国${j.rank}位`;
+      $('endRankMsg').textContent = j.isBest ? `自己ベスト更新！ ${rk}` : `自己ベストは${fmtTime(j.best)}（${rk}）`;
+      renderRanking($('endRankList'), id, j.top, j.me);
     })
     .catch(() => {
       $('endRankMsg').textContent = '通信できなかったため、この端末の記録を表示しています';
@@ -1070,8 +1083,7 @@ $('rankingBtn').addEventListener('click', () => {
       $('rankNote').innerHTML = j.myRank > 0
         ? `<span class="nw">全国ランキング</span><br><span class="nw">（あなたは${j.myRank}位）</span>`
         : '<span class="nw">全国ランキング</span><br><span class="nw">（全10ステージのトータルタイム）</span>';
-      renderRanking($('rankList'), null, j.top);
-      const me = $('rankList').querySelector('.me'); if (me) me.scrollIntoView({ block:'center' });
+      renderRanking($('rankList'), null, j.top, j.me);
     })
     .catch(() => { $('rankNote').textContent = '通信できなかったため、この端末の記録を表示しています'; renderRanking($('rankList')); });
 });
